@@ -1,0 +1,6 @@
+# [ROBOTS.TXT] Keep crawlers out of the admin area, APIs, and uploads
+User-agent: *
+Disallow: /admin.html
+Disallow: /api/
+Disallow: /uploads/
+Disallow: /access.html

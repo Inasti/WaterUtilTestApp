@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Water Controller</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div id="app" hidden>
+  <header><strong>Water Controller</strong><span><a id="nav" href="/access.html" style="color:#fff" hidden>Device access</a> <span id="who"></span> <button class="alt" id="out">Sign out</button></span></header>
+  <main>
+    <section>
+      <h2>Pumps and water levels</h2>
+      <!-- [SQL SEARCH BAR] device search (name or region) -> GET /api/devices?q= -->
+      <div class="row"><input id="ds" type="search" placeholder="Search devices by name or region" aria-label="Search devices"></div>
+      <div class="wrap"><table>
+        <thead><tr><th>Device</th><th>Type</th><th>Region</th><th>Status</th><th>Level</th><th>Pump</th><th>Last seen</th><th></th></tr></thead>
+        <tbody id="dt"></tbody>
+      </table></div>
+    </section>
+
+    <section>
+      <h2>Files</h2>
+      <!-- [FILE UPLOAD] open to all signed-in users; customers see and replace only their own files -->
+      <form id="up" class="row"><input type="file" id="uf" required><button>Upload file</button></form>
+      <!-- [SQL SEARCH BAR] file search (filename) -> GET /api/files?q= -->
+      <div class="row"><input id="fs" type="search" placeholder="Search files" aria-label="Search files"></div>
+      <div class="wrap"><table>
+        <thead><tr><th>File</th><th>Uploaded by</th><th>Uploaded</th><th></th></tr></thead>
+        <tbody id="ft"></tbody>
+      </table></div>
+    </section>
+  </main>
+
+  <dialog id="cfg">
+    <h2 id="ct">Device configuration</h2>
+    <textarea id="ctext" aria-label="Configuration JSON"></textarea>
+    <div id="cerr" class="err" role="alert"></div>
+    <div class="row"><button id="csave">Save configuration</button><button class="alt" id="cclose">Cancel</button></div>
+  </dialog>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+async function api(url, opt = {}) {
+  if (opt.body && !(opt.body instanceof FormData)) opt.headers = { 'Content-Type': 'application/json' };
+  const r = await fetch(url, opt);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || r.statusText);
+  return d;
+}
+let me, cfgId, timer;
+const canEdit = () => me && (me.role === 'staff' || me.role === 'admin');
+
+// [LOGIN HANDLING] sign-in lives on /login.html; no session sends the visitor there
+$('#out').onclick = async () => { await api('/api/logout', { method: 'POST' }); location.href = '/login.html'; };
+api('/api/me').then((u) => { me = u; start(); }).catch(() => { location.href = '/login.html'; });
+
+function start() {
+  $('#app').hidden = false;
+  $('#who').textContent = `${me.username} (${me.role})`;
+  $('#nav').hidden = !canEdit();
+  loadDevices(); loadFiles();
+  clearInterval(timer); timer = setInterval(loadDevices, 15000);
+}
+
+// [SQL SEARCH BAR] device table + search
+async function loadDevices() {
+  const d = await api('/api/devices?q=' + encodeURIComponent($('#ds').value));
+  $('#dt').innerHTML = d.map((x) => `<tr>
+    <td>${esc(x.NAME)}</td><td>${esc(x.TYPE)}</td><td>${esc(x.REGION)}</td>
+    <td class="${x.STATUS === 'ok' ? '' : 'bad'}">${esc(x.STATUS)}</td>
+    <td>${x.LEVEL_PCT == null ? '-' : `<span class="bar"><i style="width:${Math.min(100, +x.LEVEL_PCT)}%"></i></span>${esc(x.LEVEL_PCT)}%`}</td>
+    <td>${esc(x.PUMP_STATE || '-')}</td><td>${x.LAST_SEEN ? new Date(x.LAST_SEEN).toLocaleString() : 'never'}</td>
+    <td>${canEdit() ? `<button class="alt" data-cfg="${x.ID}" data-name="${esc(x.NAME)}">Edit config</button>` : ''}</td></tr>`).join('')
+    || '<tr><td colspan="8">No devices match your search.</td></tr>';
+}
+$('#ds').oninput = loadDevices;
+
+// Device configuration editor (staff / admin)
+$('#dt').onclick = async (e) => {
+  const id = e.target.dataset.cfg; if (!id) return;
+  cfgId = id; $('#ct').textContent = 'Configuration: ' + e.target.dataset.name; $('#cerr').textContent = '';
+  const c = await api(`/api/devices/${id}/config`);
+  try { $('#ctext').value = JSON.stringify(JSON.parse(c.config), null, 2); } catch { $('#ctext').value = c.config; }
+  $('#cfg').showModal();
+};
+$('#cclose').onclick = () => $('#cfg').close();
+$('#csave').onclick = async () => {
+  try { await api(`/api/devices/${cfgId}/config`, { method: 'PUT', body: JSON.stringify({ config: $('#ctext').value }) }); $('#cfg').close(); }
+  catch (x) { $('#cerr').textContent = x.message; }
+};
+
+// [FILE UPLOAD] upload, replace, list, download
+async function loadFiles() {
+  const f = await api('/api/files?q=' + encodeURIComponent($('#fs').value));
+  $('#ft').innerHTML = f.map((x) => `<tr><td>${esc(x.FILENAME)}</td><td>${esc(x.UPLOADED_BY)}</td>
+    <td>${new Date(x.UPLOADED_AT).toLocaleString()}</td>
+    <td><a class="btn alt" href="/api/files/${x.ID}/download">Download</a>
+    <label class="btn alt">Replace<input type="file" hidden data-replace="${x.ID}"></label></td></tr>`).join('')
+    || '<tr><td colspan="4">No files found.</td></tr>';
+}
+$('#fs').oninput = loadFiles;
+$('#up').onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(); fd.append('file', $('#uf').files[0]);
+  try { await api('/api/files', { method: 'POST', body: fd }); $('#up').reset(); loadFiles(); } catch (x) { alert(x.message); }
+};
+$('#ft').onchange = async (e) => {
+  const id = e.target.dataset.replace; if (!id) return;
+  const fd = new FormData(); fd.append('file', e.target.files[0]);
+  try { await api('/api/files/' + id, { method: 'PUT', body: fd }); loadFiles(); } catch (x) { alert(x.message); }
+};
+</script>
+</body>
+</html>

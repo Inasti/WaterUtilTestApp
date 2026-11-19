@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Water Controller - Sign in</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<!-- [LOGIN HANDLING] dedicated customer / staff login -> POST /api/login (administrators use /admin.html) -->
+<div class="login">
+  <section>
+    <h1>Water Controller</h1>
+    <form id="lf">
+      <label for="u">Username</label><input id="u" autocomplete="username" required>
+      <label for="p">Password</label><input id="p" type="password" autocomplete="current-password" required>
+      <div id="err" class="err" role="alert"></div>
+      <button>Sign in</button>
+    </form>
+  </section>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+$('#lf').onsubmit = async (e) => {
+  e.preventDefault();
+  const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: $('#u').value, password: $('#p').value }) });
+  if (r.ok) location.href = '/index.html';
+  else $('#err').textContent = (await r.json().catch(() => ({}))).error || 'Sign in failed';
+};
+</script>
+</body>
+</html>

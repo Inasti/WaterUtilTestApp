@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Water Controller - Device access</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header><strong>Device access</strong><span><a href="/index.html" style="color:#fff">Dashboard</a> <span id="who"></span> <button class="alt" id="out">Sign out</button></span></header>
+<main>
+  <section>
+    <h2>Tags</h2>
+    <p>A customer sees only devices that share a tag with them. Staff and administrators see every device.</p>
+    <!-- [API] create tag -> POST /api/tags -->
+    <form id="tf" class="row"><input id="tn" placeholder="New tag, e.g. north-region" required aria-label="New tag"><button>Add tag</button></form>
+    <div id="terr" class="err" role="alert"></div>
+  </section>
+  <section>
+    <h2>Customer access</h2>
+    <!-- [SQL SEARCH BAR] customer lookup -> GET /api/access/users?q= -->
+    <div class="row"><input id="us" type="search" placeholder="Look up customers" aria-label="Look up customers"></div>
+    <div class="wrap"><table><thead><tr><th>Customer</th><th>Tags</th></tr></thead><tbody id="ut"></tbody></table></div>
+  </section>
+  <section>
+    <h2>Device tags</h2>
+    <!-- [SQL SEARCH BAR] device lookup -> GET /api/access/devices?q= -->
+    <div class="row"><input id="ds" type="search" placeholder="Look up devices by name or region" aria-label="Look up devices"></div>
+    <div class="wrap"><table><thead><tr><th>Device</th><th>Region</th><th>Tags</th></tr></thead><tbody id="dt"></tbody></table></div>
+  </section>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+async function api(url, opt = {}) {
+  if (opt.body) opt.headers = { 'Content-Type': 'application/json' };
+  const r = await fetch(url, opt);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || r.statusText);
+  return d;
+}
+let TAGS = [];
+// [LOGIN HANDLING] staff and administrators only; everyone else is sent to sign in
+$('#out').onclick = async () => { await api('/api/logout', { method: 'POST' }); location.href = '/login.html'; };
+api('/api/me').then((u) => { if (u.role === 'customer') throw 0; $('#who').textContent = `${u.username} (${u.role})`; loadAll(); })
+  .catch(() => { location.href = '/login.html'; });
+
+const boxes = (sel) => TAGS.map((t) => `<label style="margin-right:14px;white-space:nowrap"><input type="checkbox" value="${t.ID}" ${sel.some((s) => s.id === t.ID) ? 'checked' : ''}> ${esc(t.NAME)}</label>`).join('') || 'No tags yet. Add one above.';
+async function loadAll() { TAGS = await api('/api/tags'); loadUsers(); loadDevices(); }
+async function loadUsers() {
+  const u = await api('/api/access/users?q=' + encodeURIComponent($('#us').value));
+  $('#ut').innerHTML = u.map((x) => `<tr data-id="${x.ID}"><td>${esc(x.USERNAME)}</td><td>${boxes(x.TAGS)}</td></tr>`).join('') || '<tr><td colspan="2">No customers found.</td></tr>';
+}
+async function loadDevices() {
+  const d = await api('/api/access/devices?q=' + encodeURIComponent($('#ds').value));
+  $('#dt').innerHTML = d.map((x) => `<tr data-id="${x.ID}"><td>${esc(x.NAME)}</td><td>${esc(x.REGION)}</td><td>${boxes(x.TAGS)}</td></tr>`).join('') || '<tr><td colspan="3">No devices found.</td></tr>';
+}
+$('#us').oninput = loadUsers; $('#ds').oninput = loadDevices;
+
+// [API] save a row's tags as soon as a box is ticked or cleared
+for (const [sel, kind, reload] of [['#ut', 'users', loadUsers], ['#dt', 'devices', loadDevices]]) {
+  $(sel).onchange = async (e) => {
+    const tr = e.target.closest('tr');
+    const tags = [...tr.querySelectorAll('input:checked')].map((i) => +i.value);
+    try { await api(`/api/access/${kind}/${tr.dataset.id}/tags`, { method: 'PUT', body: JSON.stringify({ tags }) }); }
+    catch (x) { alert(x.message); reload(); }
+  };
+}
+$('#tf').onsubmit = async (e) => {
+  e.preventDefault(); $('#terr').textContent = '';
+  try { await api('/api/tags', { method: 'POST', body: JSON.stringify({ name: $('#tn').value }) }); $('#tf').reset(); loadAll(); }
+  catch (x) { $('#terr').textContent = x.message; }
+};
+</script>
+</body>
+</html>

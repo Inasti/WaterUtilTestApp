@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Water Controller - Administration</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- [LOGIN HANDLING] separate administrator logon -> POST /api/admin/login -->
+<div id="login" class="login">
+  <section>
+    <h1>Administrator sign in</h1>
+    <form id="lf">
+      <label for="u">Username</label><input id="u" autocomplete="username" required>
+      <label for="p">Password</label><input id="p" type="password" autocomplete="current-password" required>
+      <div id="err" class="err" role="alert"></div>
+      <button>Sign in</button>
+    </form>
+  </section>
+</div>
+
+<div id="app" hidden>
+  <header><strong>Administration</strong><span><a href="/access.html" style="color:#fff">Device access</a> <a href="/index.html" style="color:#fff">Dashboard</a> <span id="who"></span> <button class="alt" id="out">Sign out</button></span></header>
+  <main>
+    <section>
+      <h2>Add user</h2>
+      <!-- [API] add user -> POST /api/admin/users -->
+      <form id="af" class="row">
+        <input id="nu" placeholder="Username" required aria-label="New username">
+        <input id="np" type="password" placeholder="Password (10+ characters)" minlength="10" required aria-label="New password">
+        <select id="nr" aria-label="Role"><option value="customer">Customer</option><option value="staff">Staff (engineer)</option><option value="admin">Administrator</option></select>
+        <button>Add user</button>
+      </form>
+      <div id="aerr" class="err" role="alert"></div>
+    </section>
+
+    <section>
+      <h2>Users</h2>
+      <!-- [SQL SEARCH BAR] user lookup (username or role) -> GET /api/admin/users?q= -->
+      <div class="row"><input id="us" type="search" placeholder="Look up users by name or role" aria-label="Look up users"></div>
+      <div class="wrap"><table>
+        <thead><tr><th>Username</th><th>Role</th><th>Created</th><th></th></tr></thead>
+        <tbody id="ut"></tbody>
+      </table></div>
+    </section>
+  </main>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+async function api(url, opt = {}) {
+  if (opt.body) opt.headers = { 'Content-Type': 'application/json' };
+  const r = await fetch(url, opt);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || r.statusText);
+  return d;
+}
+
+// [LOGIN HANDLING] admin sign in / out
+$('#lf').onsubmit = async (e) => {
+  e.preventDefault();
+  try { const me = await api('/api/admin/login', { method: 'POST', body: JSON.stringify({ username: $('#u').value, password: $('#p').value }) }); start(me); }
+  catch (x) { $('#err').textContent = x.message; }
+};
+$('#out').onclick = async () => { await api('/api/logout', { method: 'POST' }); location.reload(); };
+api('/api/me').then((u) => { if (u.role === 'admin') start(u); }).catch(() => {});
+function start(me) { $('#login').hidden = true; $('#app').hidden = false; $('#who').textContent = me.username; loadUsers(); }
+
+// [SQL SEARCH BAR] user lookup
+async function loadUsers() {
+  const u = await api('/api/admin/users?q=' + encodeURIComponent($('#us').value));
+  $('#ut').innerHTML = u.map((x) => `<tr><td>${esc(x.USERNAME)}</td><td>${esc(x.ROLE)}</td>
+    <td>${new Date(x.CREATED_AT).toLocaleDateString()}</td>
+    <td><button class="del" data-del="${x.ID}">Delete</button></td></tr>`).join('') || '<tr><td colspan="4">No users found.</td></tr>';
+}
+$('#us').oninput = loadUsers;
+
+// [API] add / delete user
+$('#af').onsubmit = async (e) => {
+  e.preventDefault(); $('#aerr').textContent = '';
+  try { await api('/api/admin/users', { method: 'POST', body: JSON.stringify({ username: $('#nu').value, password: $('#np').value, role: $('#nr').value }) }); $('#af').reset(); loadUsers(); }
+  catch (x) { $('#aerr').textContent = x.message; }
+};
+$('#ut').onclick = async (e) => {
+  const id = e.target.dataset.del;
+  if (!id || !confirm('Delete this user?')) return;
+  try { await api('/api/admin/users/' + id, { method: 'DELETE' }); loadUsers(); } catch (x) { alert(x.message); }
+};
+</script>
+</body>
+</html>
